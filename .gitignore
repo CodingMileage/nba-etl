@@ -1,0 +1,16 @@
+# Generated warehouse and charts
+/output
+
+# Local-only backup of the full dataset (372MB, exceeds GitHub's limit)
+data/PlayerStatistics_full.csv
+
+# Python
+__pycache__/
+.venv/
+
+# macOS
+.DS_Store
+
+
+READMEV1.md
+src/trim_stats.py
