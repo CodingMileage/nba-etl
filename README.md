@@ -69,7 +69,11 @@ python src/analysis.py   # Run analyses and generate charts + CSVs
 
 ## Sample Output
 
-![Scoring trend by season](figures/scoring_trend_by_season.png)
+<!-- ![Scoring trend by season](figures/scoring_trend_by_season.png) -->
+
+![Field goal percentage effect on wins](figures/field_goal_percentage_vs_win_percentage.png)
+![Offensive Rebound effect on wins](figures/offensive_rebounds_vs_win_percentage.png)
+![Turnover effect on wins](figures/turnovers_vs_win_percentage.png)
 
 ## Roadmap
 

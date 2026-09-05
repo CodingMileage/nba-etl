@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
+import scipy
 
 DB_PATH = Path(__file__).resolve().parent.parent / "output" / "my_nba.db"
 OUT_DIR = Path(__file__).resolve().parent.parent / "output"
@@ -15,7 +16,7 @@ def get_conn():
 def scoring_trend_by_season():
     conn = get_conn()
     q = """
-        SELECT season, AVG(points) AS avg_points_per_player_game, COUNT(*) AS n
+        SELECT season, ROUND(AVG(points), 2) AS avg_points_per_player_game, COUNT(*) AS n
         FROM player_game_stats s
         JOIN games g ON g.gameId = s.gameId
         WHERE g.gameType = 'Regular Season' AND season IS NOT NULL
@@ -39,7 +40,7 @@ def scoring_trend_by_season():
 
 
 
-def minutes_vs_points_regression_regular_season():
+def points_vs_minutes_regression_regular_season():
     conn = get_conn()
     query = f"""
         SELECT numMinutes, points
@@ -49,27 +50,198 @@ def minutes_vs_points_regression_regular_season():
     """
     df = pd.read_sql(query, conn)
     conn.close()
+
+    regression = scipy.stats.linregress(x=df["numMinutes"], y=df["points"])
+    print(f"Minutes vs Points Regression: {regression.slope:.4f} * x + {regression.intercept:.4f}")
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.scatter(df["numMinutes"], df["points"], alpha=0.5)
+
+    x_vals = np.array([df["numMinutes"].min(), df["numMinutes"].max()])
+    y_vals = np.array([regression.slope * x + regression.intercept for x in x_vals])
+    ax.plot(x_vals, y_vals, color="red", linewidth=2,
+            label=f"y = {regression.slope:.4f}x + {regression.intercept:.4f} (r={regression.rvalue:.3f})")
+    ax.legend()
+    
+    ax.set_title("Minutes vs Points (Regular Season)")
+    ax.set_xlabel("Minutes")
+    ax.set_ylabel("Points")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "minutes_vs_points_regression_regular_season.png")
+    plt.close(fig)
+    df.to_csv(OUT_DIR / "minutes_vs_points_regression_regular_season.csv", index=False)
+
     return df
 
-def minutes_vs_points_regression_playoffs():
+def offensive_rebounds_vs_win_percentage():
     conn = get_conn()
     query = f"""
-        SELECT numMinutes, points
-        FROM player_game_stats s
+        SELECT teamId, season, SUM(reboundsOffensive) AS total_off_rebounds,
+               SUM(win) AS total_wins, COUNT(*) AS total_games
+        FROM team_stats s
         JOIN games g ON g.gameId = s.gameId
-        WHERE g.gameType = 'Playoffs'
+        WHERE g.gameType = 'Regular Season'
+        GROUP BY teamId, season
     """
     df = pd.read_sql(query, conn)
     conn.close()
+    df["win_percentage"] = df["total_wins"] / df["total_games"]
+    df["off_rebounds_per_game"] = df["total_off_rebounds"] / df["total_games"]
+
+    regression = scipy.stats.linregress(x=df["off_rebounds_per_game"], y=df["win_percentage"])
+    print(f"Offensive Rebounds vs Win % Regression: {regression.slope:.4f} * x + {regression.intercept:.4f}")
+
+    
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.scatter(df["off_rebounds_per_game"], df["win_percentage"], alpha=0.5)
+
+    x_vals = np.array([df["off_rebounds_per_game"].min(), df["off_rebounds_per_game"].max()])
+    y_vals = np.array([regression.slope * x + regression.intercept for x in x_vals])
+    ax.plot(x_vals, y_vals, color="red", linewidth=2,
+            label=f"y = {regression.slope:.4f}x + {regression.intercept:.4f} (r={regression.rvalue:.3f})")
+    ax.legend()
+    
+    ax.set_title("Offensive Rebounds per Game vs Win Percentage")
+    ax.set_xlabel("Offensive Rebounds per Game")
+    ax.set_ylabel("Win Percentage")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "offensive_rebounds_vs_win_percentage.png")
+    plt.close(fig)
+    df.to_csv(OUT_DIR / "offensive_rebounds_vs_win_percentage.csv", index=False)
+
+    return df
+
+def assists_vs_win_percentage():
+    conn = get_conn()
+    query = f"""
+        SELECT teamId, season, SUM(assists) AS total_assists,
+               SUM(win) AS total_wins, COUNT(*) AS total_games
+        FROM team_stats s
+        JOIN games g ON g.gameId = s.gameId
+        WHERE g.gameType = 'Regular Season'
+        GROUP BY teamId, season
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+    df["win_percentage"] = df["total_wins"] / df["total_games"]
+    df["assists_per_game"] = df["total_assists"] / df["total_games"]
+
+    regression = scipy.stats.linregress(x=df["assists_per_game"], y=df["win_percentage"])
+    print(f"Assists vs Win % Regression: {regression.slope:.4f} * x + {regression.intercept:.4f}")
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.scatter(df["assists_per_game"], df["win_percentage"], alpha=0.5)
+
+    x_vals = np.array([df["assists_per_game"].min(), df["assists_per_game"].max()])
+    y_vals = np.array([regression.slope * x + regression.intercept for x in x_vals])
+    ax.plot(x_vals, y_vals, color="red", linewidth=2,
+            label=f"y = {regression.slope:.4f}x + {regression.intercept:.4f} (r={regression.rvalue:.3f})")
+    ax.legend()
+    
+    ax.set_title("Assists per Game vs Win Percentage")
+    ax.set_xlabel("Assists per Game")
+    ax.set_ylabel("Win Percentage")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "assists_vs_win_percentage.png")
+    plt.close(fig)
+    df.to_csv(OUT_DIR / "assists_vs_win_percentage.csv", index=False)
+
+    return df
+
+def turnovers_vs_win_percentage():
+    conn = get_conn()
+    query = f"""
+        SELECT teamId, season, SUM(turnovers) AS total_turnovers,
+               SUM(win) AS total_wins, COUNT(*) AS total_games
+        FROM team_stats s
+        JOIN games g ON g.gameId = s.gameId
+        WHERE g.gameType = 'Regular Season'
+        GROUP BY teamId, season
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+    df["win_percentage"] = df["total_wins"] / df["total_games"]
+    df["turnovers_per_game"] = df["total_turnovers"] / df["total_games"]
+
+    regression = scipy.stats.linregress(x=df["turnovers_per_game"], y=df["win_percentage"])
+    print(f"Turnovers vs Win % Regression: {regression.slope:.4f} * x + {regression.intercept:.4f}")
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.scatter(df["turnovers_per_game"], df["win_percentage"], alpha=0.5)
+
+    x_vals = np.array([df["turnovers_per_game"].min(), df["turnovers_per_game"].max()])
+    y_vals = np.array([regression.slope * x + regression.intercept for x in x_vals])
+    ax.plot(x_vals, y_vals, color="red", linewidth=2,
+            label=f"y = {regression.slope:.4f}x + {regression.intercept:.4f} (r={regression.rvalue:.3f})")
+    ax.legend()
+
+    ax.set_title("Turnovers per Game vs Win Percentage")
+    ax.set_xlabel("Turnovers per Game")
+    ax.set_ylabel("Win Percentage")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "turnovers_vs_win_percentage.png")
+    plt.close(fig)
+    df.to_csv(OUT_DIR / "turnovers_vs_win_percentage.csv", index=False)
+
+    return df
+
+def field_goal_percentage_vs_win_percentage():
+    conn = get_conn()
+    query = f"""
+        SELECT teamId, season, SUM(fieldGoalsMade) AS total_fg_made,
+               SUM(fieldGoalsAttempted) AS total_fg_attempted,
+               SUM(win) AS total_wins, COUNT(*) AS total_games
+        FROM team_stats s
+        JOIN games g ON g.gameId = s.gameId
+        WHERE g.gameType = 'Regular Season'
+        GROUP BY teamId, season
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+    df["win_percentage"] = df["total_wins"] / df["total_games"]
+    df["field_goal_percentage"] = df["total_fg_made"] / df["total_fg_attempted"]
+
+    regression = scipy.stats.linregress(x=df["field_goal_percentage"], y=df["win_percentage"])
+    print(f"Field Goal % vs Win % Regression: {regression.slope:.4f} * x + {regression.intercept:.4f}")
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.scatter(df["field_goal_percentage"], df["win_percentage"], alpha=0.5)
+
+    x_vals = np.array([df["field_goal_percentage"].min(), df["field_goal_percentage"].max()])
+    y_vals = np.array([regression.slope * x + regression.intercept for x in x_vals])
+    ax.plot(x_vals, y_vals, color="red", linewidth=2,
+            label=f"y = {regression.slope:.4f}x + {regression.intercept:.4f} (r={regression.rvalue:.3f})")
+    ax.legend()
+    
+    ax.set_title("Field Goal Percentage vs Win Percentage")
+    ax.set_xlabel("Field Goal Percentage")
+    ax.set_ylabel("Win Percentage")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "field_goal_percentage_vs_win_percentage.png")
+    plt.close(fig)
+    df.to_csv(OUT_DIR / "field_goal_percentage_vs_win_percentage.csv", index=False)
+
     return df
 
 def run():
     trend = scoring_trend_by_season()
-    regression_df = minutes_vs_points_regression_regular_season()
-    playoffs_df = minutes_vs_points_regression_playoffs()
-    print(trend.tail())
-    print(regression_df.head())
-    print(playoffs_df.head())
+    regression_df = points_vs_minutes_regression_regular_season()
+    off_rebounds_df = offensive_rebounds_vs_win_percentage()
+    assists_df = assists_vs_win_percentage()
+    turnovers_df = turnovers_vs_win_percentage()
+    field_goal_df = field_goal_percentage_vs_win_percentage()
+    # playoffs_df = minutes_vs_points_regression_playoffs()
+    # print(trend.tail())
+    # print(regression_df)
+    # print(playoffs_df.head())
+    # print(off_rebounds_df.head())
+    # print(assists_df.head())
 
 if __name__ == "__main__":
     run()
