@@ -38,6 +38,8 @@ An end-to-end ETL project that combines three data sources — a REST API, a CSV
 nba-analysis/
 ├── data/                    # Raw source data
 │   ├── PlayerStatistics.csv
+│   ├── TeamStatisticsExtended.csv
+│   ├── TeamStatistics.csv
 │   └── source_games.db
 ├── src/
 │   ├── etl.py               # Extract → Transform → Load pipeline
@@ -74,6 +76,7 @@ python src/analysis.py   # Run analyses and generate charts + CSVs
 ![Field goal percentage effect on wins](figures/field_goal_percentage_vs_win_percentage.png)
 ![Offensive Rebound effect on wins](figures/offensive_rebounds_vs_win_percentage.png)
 ![Turnover effect on wins](figures/turnovers_vs_win_percentage.png)
+![Pace effect on wins](figures/pace_vs_win_percentage.png)
 
 ## Roadmap
 

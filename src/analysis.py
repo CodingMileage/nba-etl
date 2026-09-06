@@ -140,7 +140,7 @@ def assists_vs_win_percentage():
     ax.plot(x_vals, y_vals, color="red", linewidth=2,
             label=f"y = {regression.slope:.4f}x + {regression.intercept:.4f} (r={regression.rvalue:.3f})")
     ax.legend()
-    
+
     ax.set_title("Assists per Game vs Win Percentage")
     ax.set_xlabel("Assists per Game")
     ax.set_ylabel("Win Percentage")
@@ -229,6 +229,68 @@ def field_goal_percentage_vs_win_percentage():
 
     return df
 
+def pace_vs_win_percentage():
+    conn = get_conn()
+    query = f"""
+        SELECT teamId, season, SUM(pace) AS total_pace,
+                SUM(win) AS total_wins, COUNT(*) AS total_games
+        FROM team_stats s
+        JOIN games g ON g.gameId = s.gameId
+        WHERE g.gameType = 'Regular Season'
+        GROUP BY teamId, season
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+
+    df["win_percentage"] = df["total_wins"] / df["total_games"]
+    df["pace"] = df["total_pace"] / df["total_games"]
+
+    x = df["pace"].values
+    y = df["win_percentage"].values
+    n = len(x)
+
+    regression = scipy.stats.linregress(x=x, y=y)
+    print(f"Pace vs Win % Regression: {regression.slope:.4f} * x + {regression.intercept:.4f}")
+
+    # --- Confidence intervals on slope/intercept ---
+    dof = n - 2
+    t_crit = scipy.stats.t.ppf(0.975, dof)  # 95% two-sided
+    slope_ci = (regression.slope - t_crit * regression.stderr,
+                regression.slope + t_crit * regression.stderr)
+    intercept_ci = (regression.intercept - t_crit * regression.intercept_stderr,
+                     regression.intercept + t_crit * regression.intercept_stderr)
+    print(f"Slope 95% CI: ({slope_ci[0]:.4f}, {slope_ci[1]:.4f})")
+    print(f"Intercept 95% CI: ({intercept_ci[0]:.4f}, {intercept_ci[1]:.4f})")
+
+    # --- Confidence band around the fitted line ---
+    x_mean = x.mean()
+    ss_x = np.sum((x - x_mean) ** 2)
+    y_pred_at_x = regression.slope * x + regression.intercept
+    residual_std_err = np.sqrt(np.sum((y - y_pred_at_x) ** 2) / dof)
+
+    x_line = np.linspace(x.min(), x.max(), 100)
+    y_line = regression.slope * x_line + regression.intercept
+    se_fit = residual_std_err * np.sqrt(1 / n + (x_line - x_mean) ** 2 / ss_x)
+    ci_upper = y_line + t_crit * se_fit
+    ci_lower = y_line - t_crit * se_fit
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.scatter(x, y, alpha=0.5)
+    ax.plot(x_line, y_line, color="red", linewidth=2,
+            label=f"y = {regression.slope:.4f}x + {regression.intercept:.4f} (r={regression.rvalue:.3f})")
+    ax.fill_between(x_line, ci_lower, ci_upper, color="red", alpha=0.15, label="95% CI (mean)")
+    ax.legend()
+
+    ax.set_title("Pace vs Win Percentage")
+    ax.set_xlabel("Pace")
+    ax.set_ylabel("Win Percentage")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "pace_vs_win_percentage.png")
+    plt.close(fig)
+    df.to_csv(OUT_DIR / "pace_vs_win_percentage.csv", index=False)
+
+    return df
 def run():
     trend = scoring_trend_by_season()
     regression_df = points_vs_minutes_regression_regular_season()
@@ -236,6 +298,7 @@ def run():
     assists_df = assists_vs_win_percentage()
     turnovers_df = turnovers_vs_win_percentage()
     field_goal_df = field_goal_percentage_vs_win_percentage()
+    pace_df = pace_vs_win_percentage()
     # playoffs_df = minutes_vs_points_regression_playoffs()
     # print(trend.tail())
     # print(regression_df)
