@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:www.avnikdefense.com)"
+      "WebFetch(domain:www.avnikdefense.com)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 src/analysis.py)"
     ]
   }
 }

@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from nba_api.stats.static import players
+from nba_api.stats.static import teams
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -22,6 +23,13 @@ def extract_players():
     log.info("Extracting Players from api")
     players_list = players.get_players()
     df = pd.DataFrame(players_list)
+    log.info(f"  -> {len(df):,} raw rows")
+    return df
+
+def extract_teams():
+    log.info("Extracting Teams from api")
+    teams_list = teams.get_teams()
+    df = pd.DataFrame(teams_list)
     log.info(f"  -> {len(df):,} raw rows")
     return df
 
@@ -44,9 +52,9 @@ def extract_player_stats(nrows: int | None = None) -> pd.DataFrame:
     return df
 
 def extract_team_stats(nrows: int | None = None) -> pd.DataFrame:
-    log.info("Extracting TeamStatistics.csv")
+    log.info("Extracting TeamStatisticsExtended.csv")
     df = pd.read_csv(
-        DATA_DIR / "TeamStatistics.csv",
+        DATA_DIR / "TeamStatisticsExtended.csv",
         nrows=nrows,
         low_memory=False,
     )
@@ -134,12 +142,12 @@ def transform_player_stats(df: pd.DataFrame, players_df: pd.DataFrame, games_df:
     numTypes = df["numMinutes"].apply(type).value_counts()
     log.info(f"  -> numMinutes types:\n{numTypes}")
 
-    # Keep only 2025-26 season and later
+    # Keep only 2020-21 season and later
     df["gameDate"] = pd.to_datetime(df["gameDate"], errors="coerce")
     season = df["gameDate"].apply(_season_from_date)
     before = len(df)
-    df = df[season >= "2025-26"]
-    log.info(f"  dropped {before - len(df):,} rows before the 2025-26 season")
+    df = df[season >= "2020-21"]
+    log.info(f"  dropped {before - len(df):,} rows before the 2020-21 season")
 
     return df
 
@@ -153,7 +161,7 @@ def _season_from_date(date):
         start_year = date.year - 1
     return f"{start_year}-{str(start_year + 1)[-2:]}"
 
-def transform_games(df: pd.DataFrame) -> pd.DataFrame:
+def transform_games(df: pd.DataFrame, teams_df: pd.DataFrame) -> pd.DataFrame:
     log.info("Transforming games")
     df = df.copy()
 
@@ -167,38 +175,26 @@ def transform_games(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop_duplicates(subset=["gameId"])
     log.info(f"  dropped {before - len(df):,} rows with missing id/date or dupes")
 
-    # Nulls: attendance/arena info is legitimately missing for older/preseason
-    # games -- keep as NaN rather than imputing a fake value (imputing here
-    # would quietly corrupt any attendance-based analysis).
     df["attendance"] = pd.to_numeric(df["attendance"], errors="coerce")
 
-    # Normalize a couple of team-name typos/blank city fields
-    df["hometeamCity"] = df["hometeamCity"].fillna("Unknown")
-    df["awayteamCity"] = df["awayteamCity"].fillna("Unknown")
+    # Validate: do hometeamId/awayteamId actually exist in teams_df?
+    valid_team_ids = set(teams_df["teamId"])
+    used_team_ids = set(df["hometeamId"].dropna()) | set(df["awayteamId"].dropna())
+    unmatched_team_ids = used_team_ids - valid_team_ids
+    if unmatched_team_ids:
+        log.warning(f"  -> {len(unmatched_team_ids)} teamId(s) in games not found in teams table: {sorted(unmatched_team_ids)}")
+
+    before = len(df)
+    df = df[df["hometeamId"].isin(valid_team_ids) & df["awayteamId"].isin(valid_team_ids)]
+    log.info(f"  dropped {before - len(df):,} rows with unmatched team id(s) ({before:,} -> {len(df):,})")
 
     keep = [
         "gameId", "gameDate", "season", "gameType",
-        "hometeamId", "hometeamCity", "hometeamName",
-        "awayteamId", "awayteamCity", "awayteamName",
+        "hometeamId", "awayteamId",
         "arenaName", "attendance"
     ]
     df = df[keep]
 
-    return df
-
-def transform_team_stats(df: pd.DataFrame) -> pd.DataFrame:
-    log.info("Transforming team stats")
-    df = df.copy()
-
-    # Drop rows with no usable game identity
-    before = len(df)
-    df = df.dropna(subset=["gameId"])
-    df = df.drop_duplicates(subset=["gameId"])
-    log.info(f"  dropped {before - len(df):,} rows with missing id/date or dupes")
-
-    df = df.dropna(subset=['reboundsOffensive', 'win', 'teamId'])
-
-    # Keep only 2020-21 season and later
     df["gameDate"] = pd.to_datetime(df["gameDate"], errors="coerce")
     season = df["gameDate"].apply(_season_from_date)
     before = len(df)
@@ -207,6 +203,102 @@ def transform_team_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def transform_teams(df: pd.DataFrame) -> pd.DataFrame:
+    log.info("Transforming teams")
+    df = df.copy()
+
+    df.rename(columns={
+        "id": "teamId",
+        "full_name": "teamName",
+        "abbreviation": "teamAbbreviation",
+        "city": "teamCity",
+    }, inplace=True)
+
+    keep = ["teamId", "teamCity", "teamName", "teamAbbreviation"]
+    df = df[keep]
+
+    return df
+
+def transform_team_stats(df: pd.DataFrame, teams_df: pd.DataFrame, games_df: pd.DataFrame) -> pd.DataFrame:
+    log.info("Transforming team stats")
+    df = df.copy()
+
+    # Drop rows with no usable game identity
+    before = len(df)
+    df = df.dropna(subset=["gameId"])
+    df = df.drop_duplicates(subset=["gameId", "teamId"])
+    log.info(f"  dropped {before - len(df):,} rows with missing id/date or dupes")
+
+    df = df.dropna(subset=['reboundsOffensive', 'win', 'teamId'])
+
+    # Keep only 2020-21 season and later
+    df["gameDateTimeEst"] = pd.to_datetime(df["gameDateTimeEst"], errors="coerce")
+    season = df["gameDateTimeEst"].apply(_season_from_date)
+    before = len(df)
+    df = df[season >= "2020-21"]
+    log.info(f"  dropped {before - len(df):,} rows before the 2020-21 season")
+
+    # Validate: do teamId/opponentTeamId exist in teams_df?
+    valid_team_ids = set(teams_df["teamId"])
+    used_team_ids = set(df["teamId"].dropna()) | set(df["opponentTeamId"].dropna())
+    unmatched_team_ids = used_team_ids - valid_team_ids
+    if unmatched_team_ids:
+        log.warning(f"  -> {len(unmatched_team_ids)} teamId(s) not found in teams table: {sorted(unmatched_team_ids)}")
+
+    before = len(df)
+    df = df[df["teamId"].isin(valid_team_ids) & df["opponentTeamId"].isin(valid_team_ids)]
+    log.info(f"  dropped {before - len(df):,} rows with unmatched team id(s) ({before:,} -> {len(df):,})")
+
+    # Validate: does gameId exist in games_df?
+    valid_game_ids = set(games_df["gameId"])
+    stats_game_ids = set(df["gameId"].dropna())
+    unmatched_game_ids = stats_game_ids - valid_game_ids
+    if unmatched_game_ids:
+        log.warning(f"  -> {len(unmatched_game_ids)} gameId(s) not found in games table")
+
+    before = len(df)
+    df = df[df["gameId"].isin(valid_game_ids)]
+    log.info(f"  dropped {before - len(df):,} rows with unmatched gameId(s) ({before:,} -> {len(df):,})")
+
+    keep = [
+        "gameId", "gameDateTimeEst", "gameType", "gameLabel", "gameSubLabel",
+        "seriesGameNumber", "teamId", "opponentTeamId", "home", "win",
+        "teamScore", "opponentScore", "seed", "numMinutes", "assists",
+        "steals", "blocks", "blocksAgainst", "fieldGoalsMade",
+        "fieldGoalsAttempted", "fieldGoalsPercentage", "threePointersMade",
+        "threePointersAttempted", "threePointersPercentage", "freeThrowsMade",
+        "freeThrowsAttempted", "freeThrowsPercentage", "reboundsOffensive",
+        "reboundsDefensive", "reboundsTotal", "reboundsTeam", "foulsPersonal",
+        "personalFoulsDrawn", "turnovers", "turnoversTeam", "plusMinusPoints",
+        "q1Points", "q2Points", "q3Points", "q4Points", "ot1Points",
+        "ot2Points", "otAllPoints", "benchPoints", "biggestLead",
+        "biggestScoringRun", "leadChanges", "pointsFastBreak",
+        "pointsFromTurnovers", "pointsInThePaint", "pointsSecondChance",
+        "timesTied", "timeoutsRemaining", "seasonWins", "seasonLosses",
+        "estimatedOffensiveRating", "offensiveRating",
+        "estimatedDefensiveRating", "defensiveRating", "estimatedNetRating",
+        "netRating", "assistPercentage", "assistToTurnoverRatio",
+        "assistRatio", "offensiveReboundPercentage",
+        "defensiveReboundPercentage", "reboundPercentage",
+        "teamTurnoverPercentage", "effectiveFieldGoalPercentage",
+        "trueShootingPercentage", "estimatedPace", "pace", "pacePer40",
+        "possessions", "playerImpactEstimate", "pointsOffTurnovers",
+        "opponentPointsOffTurnovers", "opponentPointsSecondChance",
+        "opponentPointsFastBreak", "opponentPointsInPaint",
+        "percentFieldGoalAttempts2Point", "percentFieldGoalAttempts3Point",
+        "percentPoints2Point", "percentPoints2PointMidRange",
+        "percentPoints3Point", "percentPointsFastBreak",
+        "percentPointsFreeThrow", "percentPointsOffTurnovers",
+        "percentPointsInPaint", "percentAssisted2PointMade",
+        "percentUnassisted2PointMade", "percentAssisted3PointMade",
+        "percentUnassisted3PointMade", "percentAssistedFieldGoalsMade",
+        "percentUnassistedFieldGoalsMade", "freeThrowAttemptRate",
+        "opponentEffectiveFieldGoalPercentage", "opponentFreeThrowAttemptRate",
+        "opponentTurnoverPercentage", "opponentOffensiveReboundPercentage",
+    ]
+    df = df[keep]
+
+    return df
 
 
 #
@@ -275,7 +367,6 @@ def load_games(df: pd.DataFrame):
     log.info("Loading games into SQLite")
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
-    # conn.execute("DROP TABLE IF EXISTS games")
     conn.execute("""
         CREATE TABLE games (
             gameId INTEGER PRIMARY KEY,
@@ -283,60 +374,80 @@ def load_games(df: pd.DataFrame):
             season TEXT,
             gameType TEXT,
             hometeamId INTEGER,
-            hometeamCity TEXT,
-            hometeamName TEXT,
             awayteamId INTEGER,
-            awayteamCity TEXT,
-            awayteamName TEXT,
             arenaName TEXT,
-            attendance INTEGER
+            attendance INTEGER,
+            FOREIGN KEY (hometeamId) REFERENCES teams (teamId),
+            FOREIGN KEY (awayteamId) REFERENCES teams (teamId)
         )
     """)
     df.to_sql("games", conn, if_exists="append", index=False)
+    conn.close()
+
+def load_teams(df: pd.DataFrame):
+    log.info("Loading teams into SQLite")
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("""
+        CREATE TABLE teams (
+            teamId INTEGER PRIMARY KEY,
+            teamCity TEXT,
+            teamName TEXT,
+            teamAbbreviation TEXT
+        )
+    """)
+    df.to_sql("teams", conn, if_exists="append", index=False)
     conn.close()
 
 def load_team_stats(df: pd.DataFrame):
     log.info("Loading team stats into SQLite")
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
-    # conn.execute("DROP TABLE IF EXISTS team_stats")
     conn.execute("""
         CREATE TABLE team_stats (
             gameId INTEGER,
             gameDateTimeEst TEXT,
-            teamCity TEXT,
-            teamName TEXT,
+            gameType TEXT,
+            gameLabel TEXT,
+            gameSubLabel TEXT,
+            seriesGameNumber INTEGER,
             teamId INTEGER,
-            opponentTeamCity TEXT,
-            opponentTeamName TEXT,
             opponentTeamId INTEGER,
             home INTEGER,
             win INTEGER,
             teamScore INTEGER,
             opponentScore INTEGER,
-            assists INTEGER,
-            blocks INTEGER,
-            steals INTEGER,
-            fieldGoalsAttempted INTEGER,
-            fieldGoalsMade INTEGER,
-            fieldGoalsPercentage REAL,
-            threePointersAttempted INTEGER,
-            threePointersMade INTEGER,
-            threePointersPercentage REAL,
-            freeThrowsAttempted INTEGER,
-            freeThrowsMade INTEGER,
-            freeThrowsPercentage REAL,
-            reboundsDefensive INTEGER,
-            reboundsOffensive INTEGER,
-            reboundsTotal INTEGER,
-            foulsPersonal INTEGER,
-            turnovers INTEGER,
-            plusMinusPoints INTEGER,
+            seed INTEGER,
             numMinutes REAL,
+            assists INTEGER,
+            steals INTEGER,
+            blocks INTEGER,
+            blocksAgainst INTEGER,
+            fieldGoalsMade INTEGER,
+            fieldGoalsAttempted INTEGER,
+            fieldGoalsPercentage REAL,
+            threePointersMade INTEGER,
+            threePointersAttempted INTEGER,
+            threePointersPercentage REAL,
+            freeThrowsMade INTEGER,
+            freeThrowsAttempted INTEGER,
+            freeThrowsPercentage REAL,
+            reboundsOffensive INTEGER,
+            reboundsDefensive INTEGER,
+            reboundsTotal INTEGER,
+            reboundsTeam INTEGER,
+            foulsPersonal INTEGER,
+            personalFoulsDrawn INTEGER,
+            turnovers INTEGER,
+            turnoversTeam INTEGER,
+            plusMinusPoints INTEGER,
             q1Points INTEGER,
             q2Points INTEGER,
             q3Points INTEGER,
             q4Points INTEGER,
+            ot1Points INTEGER,
+            ot2Points INTEGER,
+            otAllPoints INTEGER,
             benchPoints INTEGER,
             biggestLead INTEGER,
             biggestScoringRun INTEGER,
@@ -349,24 +460,59 @@ def load_team_stats(df: pd.DataFrame):
             timeoutsRemaining INTEGER,
             seasonWins INTEGER,
             seasonLosses INTEGER,
-            coachId INTEGER,
-            gameType TEXT,
-            gameLabel TEXT,
-            gameSubLabel TEXT,
-            seriesGameNumber INTEGER,
-            seed INTEGER,
-            reboundsTeam INTEGER,
-            turnoversTeam INTEGER,
-            ot1Points INTEGER,
-            ot2Points INTEGER,
-            otAllPoints INTEGER,
-            gameDate TEXT,
+            estimatedOffensiveRating REAL,
+            offensiveRating REAL,
+            estimatedDefensiveRating REAL,
+            defensiveRating REAL,
+            estimatedNetRating REAL,
+            netRating REAL,
+            assistPercentage REAL,
+            assistToTurnoverRatio REAL,
+            assistRatio REAL,
+            offensiveReboundPercentage REAL,
+            defensiveReboundPercentage REAL,
+            reboundPercentage REAL,
+            teamTurnoverPercentage REAL,
+            effectiveFieldGoalPercentage REAL,
+            trueShootingPercentage REAL,
+            estimatedPace REAL,
+            pace REAL,
+            pacePer40 REAL,
+            possessions REAL,
+            playerImpactEstimate REAL,
+            pointsOffTurnovers INTEGER,
+            opponentPointsOffTurnovers INTEGER,
+            opponentPointsSecondChance INTEGER,
+            opponentPointsFastBreak INTEGER,
+            opponentPointsInPaint INTEGER,
+            percentFieldGoalAttempts2Point REAL,
+            percentFieldGoalAttempts3Point REAL,
+            percentPoints2Point REAL,
+            percentPoints2PointMidRange REAL,
+            percentPoints3Point REAL,
+            percentPointsFastBreak REAL,
+            percentPointsFreeThrow REAL,
+            percentPointsOffTurnovers REAL,
+            percentPointsInPaint REAL,
+            percentAssisted2PointMade REAL,
+            percentUnassisted2PointMade REAL,
+            percentAssisted3PointMade REAL,
+            percentUnassisted3PointMade REAL,
+            percentAssistedFieldGoalsMade REAL,
+            percentUnassistedFieldGoalsMade REAL,
+            freeThrowAttemptRate REAL,
+            opponentEffectiveFieldGoalPercentage REAL,
+            opponentFreeThrowAttemptRate REAL,
+            opponentTurnoverPercentage REAL,
+            opponentOffensiveReboundPercentage REAL,
+            PRIMARY KEY (gameId, teamId),
+            FOREIGN KEY (teamId) REFERENCES teams (teamId),
+            FOREIGN KEY (opponentTeamId) REFERENCES teams (teamId),
             FOREIGN KEY (gameId) REFERENCES games (gameId)
         )
     """)
     df.to_sql("team_stats", conn, if_exists="append", index=False)
     conn.close()
-
 
 def run_etl():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -375,40 +521,31 @@ def run_etl():
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("DROP TABLE IF EXISTS player_game_stats")
     conn.execute("DROP TABLE IF EXISTS team_stats")
-    conn.execute("DROP TABLE IF EXISTS players")
     conn.execute("DROP TABLE IF EXISTS games")
+    conn.execute("DROP TABLE IF EXISTS players")
+    conn.execute("DROP TABLE IF EXISTS teams")
     conn.close()
 
     # Extract
+    teams_df = extract_teams()
     players_df = extract_players()
     games_df = extract_games()
     player_stats_df = extract_player_stats()
     team_stats_df = extract_team_stats()
 
     # Transform
-    games_df = transform_games(games_df)
+    teams_df = transform_teams(teams_df)
+    games_df = transform_games(games_df, teams_df)
     players_df = transform_players(players_df)
     player_stats_df = transform_player_stats(player_stats_df, players_df, games_df)
-    team_stats_df = transform_team_stats(team_stats_df)
+    team_stats_df = transform_team_stats(team_stats_df, teams_df, games_df)
 
     # Load
+    load_teams(teams_df)
     load_players(players_df)
     load_games(games_df)
     load_player_stats(player_stats_df)
     load_team_stats(team_stats_df)
-    # print(team_stats_df.columns.tolist())
 
 if __name__ == "__main__":
     run_etl()
-    # conn = sqlite3.connect(DB_PATH)
-    # result = pd.read_sql("""
-    #     SELECT p.firstName, p.lastName, g.gameDate, g.season, s.points, s.assists, s.reboundsTotal
-    #     FROM player_game_stats s
-    #     JOIN players p ON s.playerId = p.playerId
-    #     JOIN games g ON s.gameId = g.gameId
-    #     ORDER BY g.gameDate DESC
-    #     LIMIT 10
-    # """, conn)
-    # conn.close()
-
-    # print(result.to_string(index=False))
