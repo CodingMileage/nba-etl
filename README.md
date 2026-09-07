@@ -77,8 +77,4 @@ python src/analysis.py   # Run analyses and generate charts + CSVs
 ![Offensive Rebound effect on wins](figures/offensive_rebounds_vs_win_percentage.png)
 ![Turnover effect on wins](figures/turnovers_vs_win_percentage.png)
 ![Pace effect on wins](figures/pace_vs_win_percentage.png)
-
-## Roadmap
-
-- [ ] Linear regression and confidence intervals (minutes → points)
-- [ ] Monte Carlo simulation of season outcome variability
+![Assist effect on wins](figures/assists_vs_win_percentage.png)
