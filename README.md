@@ -9,10 +9,10 @@ An end-to-end ETL project that combines three data sources — a REST API, a CSV
 | Source                      | Format   | Contents                                              |
 | --------------------------- | -------- | ----------------------------------------------------- |
 | `nba_api` (NBA stats API)   | REST API | ~5,000 player records                                 |
-| `data/PlayerStatistics.csv` | CSV      | 433K+ player-game stat rows (2020-21 through 2025-26) |
+| `data/PlayerStatistics.csv` | CSV      | 433K+ player-game stat rows (2015-16 through 2025-26) |
 | `data/source_games.db`      | SQLite   | Game metadata (teams, arena, attendance)              |
 
-- The `PlayerStatistics` csv file was originally 1.7 million roles but I reduced it to about 400k rows. I acheieved this by only tracking the last 6 NBA seasons.
+- The `PlayerStatistics` csv file was originally 1.7 million roles but I reduced it to about 400k rows. I acheieved this by only tracking the last 11 NBA seasons.
 
 ### Transform (`src/etl.py`)
 
