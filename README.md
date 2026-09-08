@@ -9,10 +9,10 @@ An end-to-end ETL project that combines three data sources — a REST API, a CSV
 | Source                      | Format   | Contents                                              |
 | --------------------------- | -------- | ----------------------------------------------------- |
 | `nba_api` (NBA stats API)   | REST API | ~5,000 player records                                 |
-| `data/PlayerStatistics.csv` | CSV      | 433K+ player-game stat rows (2020-21 through 2025-26) |
+| `data/PlayerStatistics.csv` | CSV      | 433K+ player-game stat rows (2015-16 through 2025-26) |
 | `data/source_games.db`      | SQLite   | Game metadata (teams, arena, attendance)              |
 
-- The `PlayerStatistics` csv file was originally 1.7 million roles but I reduced it to about 400k rows. I acheieved this by only tracking the last 6 NBA seasons.
+- The `PlayerStatistics` csv file was originally 1.7 million roles but I reduced it to about 400k rows. I acheieved this by only tracking the last 11 NBA seasons.
 
 ### Transform (`src/etl.py`)
 
@@ -24,13 +24,14 @@ An end-to-end ETL project that combines three data sources — a REST API, a CSV
 
 ### Load
 
-- Normalized schema: `players`, `games`, `player_game_stats`
+- Normalized schema: `players`, `games`, `player_game_stats, teams`
 - Foreign key constraints enforced with SQLite
 
 ## Analysis (`src/analysis.py`)
 
 - **Scoring trend by season** — SQL aggregation of average points per player-game (regular season only), rendered as a line chart and exported to CSV
 - **Minutes vs. points** — extraction of minutes/points data for regression modeling
+- **Team stats vs. win percentage** — five OLS regressions of per-game team stats (field goal %, offensive rebounds, assists, turnovers, pace) against win percentage at the team-season level (regular season only), with 95% confidence intervals on slope/intercept and a 95% confidence band around the fitted line; each rendered as a scatter plot and exported to CSV
 
 ## Project Structure
 
@@ -70,8 +71,6 @@ python src/analysis.py   # Run analyses and generate charts + CSVs
 `etl.py` must be run first — `analysis.py` reads from the warehouse it produces.
 
 ## Sample Output
-
-<!-- ![Scoring trend by season](figures/scoring_trend_by_season.png) -->
 
 ![Field goal percentage effect on wins](figures/field_goal_percentage_vs_win_percentage.png)
 ![Offensive Rebound effect on wins](figures/offensive_rebounds_vs_win_percentage.png)
